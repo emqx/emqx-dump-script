@@ -14,6 +14,11 @@ export(Dir) ->
     Blacklist = export_blacklist(Version),
     Apps = export_applications(),
     Users = export_users(),
+    Schemas = export_schemas(),
+    AuthClientid = export_auth_clientid(),
+    AuthUsername = export_auth_username(),
+    AuthMnesia = export_auth_mnesia(),
+    AclMnesia = export_acl_mnesia(),
     Filename = filename:join([Dir, "emqx-export.json"]),
     Data = [{version, erlang:list_to_binary(Version)},
             {date, iolist_to_binary(datetime())},
@@ -21,13 +26,13 @@ export(Dir) ->
             {resources, Resources},
             {blacklist, Blacklist},
             {apps, Apps},
-            {users, Users}],
-    Data2 = case ets:info(emqx_schema) of
-        undefined -> Data;
-        _ ->
-            Data ++ [{schemas, export_schemas()}]
-    end,
-    case file:write_file(Filename, emqx_json:encode(Data2)) of
+            {users, Users},
+            {auth_clientid, AuthClientid},
+            {auth_username, AuthUsername},
+            {auth_mnesia, AuthMnesia},
+            {acl_mnesia, AclMnesia},
+            {schemas, Schemas}],
+    case file:write_file(Filename, emqx_json:encode(Data)) of
         ok ->
             io:format("The emqx data has been successfully exported to ~s.~n", [Filename]);
         {error, Reason} ->
@@ -86,15 +91,55 @@ export_users() ->
                     [[{username, Username}, {password, base64:encode(Password)}, {tags, Tags}] | Acc]
                 end, [], ets:tab2list(mqtt_admin)).
 
+export_auth_clientid() ->
+    case ets:info(emqx_auth_clientid) of
+        undefined -> [];
+        _ ->
+            lists:foldl(fun({_, ClientId, Password}, Acc) ->
+                            [[{clientid, ClientId}, {password, Password}] | Acc]
+                        end, [], ets:tab2list(emqx_auth_clientid))
+    end.
+
+export_auth_username() ->
+    case ets:info(emqx_auth_username) of
+        undefined -> [];
+        _ ->
+            lists:foldl(fun({_, Username, Password}, Acc) ->
+                            [[{username, Username}, {password, Password}] | Acc]
+                        end, [], ets:tab2list(emqx_auth_username))
+    end.
+
+export_auth_mnesia() ->
+    case ets:info(emqx_user) of
+        undefined -> [];
+        _ ->
+            lists:foldl(fun({_, Login, Password, IsSuperuser}, Acc) ->
+                            [[{login, Login}, {password, Password}, {is_superuser, IsSuperuser}] | Acc]
+                        end, [], ets:tab2list(emqx_user))
+    end.
+
+export_acl_mnesia() ->
+    case ets:info(emqx_user) of
+        undefined -> [];
+        _ ->
+            lists:foldl(fun({_, Login, Topic, Action, Allow}, Acc) ->
+                            [[{login, Login}, {topic, Topic}, {action, Action}, {allow, Allow}] | Acc]
+                        end, [], ets:tab2list(emqx_acl))
+    end.
+
 export_schemas() ->
-    lists:foldl(fun({schema, Name, SchemaBin, ParserType, ParserAddr, ParserOpts, Descr}, Acc) ->
-        [[{name, Name},
-        {schema, SchemaBin},
-        {parser_type, ParserType},
-        {parser_addr, format_parser_addr(ParserAddr)},
-        {parser_opts, ParserOpts},
-        {descr, Descr}] | Acc]
-    end, [], emqx_schema_registry:get_all_schemas()).
+    case ets:info(emqx_schema) of
+        undefined -> [];
+        _ ->
+            lists:foldl(fun({schema, Name, SchemaBin, ParserType, ParserAddr, ParserOpts, Descr}, Acc) ->
+                [[{name, Name},
+                {schema, SchemaBin},
+                {parser_type, ParserType},
+                {parser_addr, format_parser_addr(ParserAddr)},
+                {parser_opts, ParserOpts},
+                {descr, Descr}] | Acc]
+            end, [], emqx_schema_registry:get_all_schemas())
+    end.
 
 
 format_parser_addr(undefined) ->
