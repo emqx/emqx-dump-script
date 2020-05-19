@@ -5,12 +5,7 @@
 read -r -d '' VAR <<'EOF'
 -module(emqx_dump).
 
--export([ export/1
-        , import/1
-        ]).
-
-versions() ->
-    ["3.2", "3.4", "4.0"].
+-export([export/1]).
 
 export(Dir) ->
     Version = string:sub_string(emqx_sys:version(), 1, 3),
@@ -37,32 +32,6 @@ export(Dir) ->
             io:format("The emqx data has been successfully exported to ~s.~n", [Filename]);
         {error, Reason} ->
             io:format("The emqx data export failed due to ~p.~n", [Reason])
-    end.
-
-import(Filename) ->
-    case file:read_file(Filename) of
-        {ok, Json} ->
-            Data = emqx_json:decode(Json, [return_maps]),
-            try
-                Version = binary_to_list(maps:get(<<"version">>, Data, <<>>)),
-                case lists:member(Version, versions()) of
-                    true ->
-                        CurrentVersion = string:sub_string(emqx_sys:version(), 1, 3),
-                        import_resources( maps:get(<<"resources">>, Data)),
-                        import_rules(Version, CurrentVersion, maps:get(<<"rules">>, Data)),
-                        import_blacklist(maps:get(<<"blacklist">>, Data)),
-                        import_applications(maps:get(<<"apps">>, Data)),
-                        import_users(maps:get(<<"users">>, Data)),
-                        import_schemas(maps:get(<<"schemas">>, Data, undefined)),
-                        io:format("The emqx data has been imported successfully.~n");
-                    false ->
-                        io:format("Unsupported version: ~p~n", [Version])
-                end
-            catch _Class:_Reason:S ->
-                io:format("The emqx data import failed due to ~p.~n", [S])
-            end;
-        {error, Reason} ->
-            io:format("The emqx data import failed due to ~p while reading ~s.~n", [Reason, Filename])
     end.
 
 export_rules() ->
@@ -127,140 +96,6 @@ export_schemas() ->
         {descr, Descr}] | Acc]
     end, [], emqx_schema_registry:get_all_schemas()).
 
-import_rules("4.0", "4.0", Rules) ->
-    lists:foreach(fun(#{<<"id">> := RuleId,
-                        <<"rawsql">> := RawSQL,
-                        <<"actions">> := Actions,
-                        <<"enabled">> := Enabled,
-                        <<"description">> := Desc}) ->
-                    NActions = lists:foldl(fun(#{<<"id">> := ActionInstId, <<"name">> := Name, <<"args">> := Args}, Acc) ->
-                                                [{action_instance, ActionInstId, any_to_atom(Name), Args} | Acc]
-                                            end, [], Actions),
-                    case emqx_rule_sqlparser:parse_select(RawSQL) of
-                        {ok, Select} ->
-                            Rule = {rule,
-                                    RuleId,
-                                    RawSQL,
-                                    emqx_rule_sqlparser:select_from(Select),
-                                    emqx_rule_sqlparser:select_is_foreach(Select),
-                                    emqx_rule_sqlparser:select_fields(Select),
-                                    emqx_rule_sqlparser:select_doeach(Select),
-                                    emqx_rule_sqlparser:select_incase(Select),
-                                    emqx_rule_sqlparser:select_where(Select),
-                                    NActions,
-                                    Enabled,
-                                    Desc},
-                            ok = emqx_rule_registry:add_rule(Rule);
-                        Error ->
-                            error(Error)
-                    end
-                end, Rules);
-
-import_rules(Version, Version, Rules) ->
-    lists:foreach(fun(#{<<"id">> := RuleId,
-                        <<"rawsql">> := RawSQL,
-                        <<"actions">> := Actions,
-                        <<"enabled">> := Enabled,
-                        <<"description">> := Desc}) ->
-                    NActions = lists:foldl(fun(#{<<"id">> := ActionInstId, <<"name">> := Name, <<"args">> := Args}, Acc) ->
-                                                [{action_instance, ActionInstId, any_to_atom(Name), Args} | Acc]
-                                            end, [], Actions),
-                    case emqx_rule_sqlparser:parse_select(RawSQL) of
-                        {ok, Select} ->
-                            Rule = {rule,
-                                    RuleId,
-                                    emqx_rule_sqlparser:select_from(Select),
-                                    RawSQL,
-                                    emqx_rule_sqlparser:select_is_foreach(Select),
-                                    emqx_rule_sqlparser:select_fields(Select),
-                                    emqx_rule_sqlparser:select_doeach(Select),
-                                    emqx_rule_sqlparser:select_incase(Select),
-                                    emqx_rule_sqlparser:select_where(Select),
-                                    NActions,
-                                    Enabled,
-                                    Desc},
-                            ok = emqx_rule_registry:add_rule(Rule);
-                        Error ->
-                            error(Error)
-                    end
-                end, Rules);
-
-import_rules(_, "4.0", Rules) ->
-    lists:foreach(fun(Rule) ->
-        io:format("do ......")
-    end, Rules).
-
-import_resources(Reources) ->
-    lists:foreach(fun(#{<<"id">> := Id,
-                        <<"type">> := Type,
-                        <<"config">> := Config,
-                        <<"created_at">> := CreatedAt,
-                        <<"description">> := Desc}) ->
-                    NCreatedAt = case CreatedAt of
-                                    null -> undefined;
-                                    _ -> CreatedAt
-                                end,
-                    emqx_rule_registry:add_resource({resource, Id, any_to_atom(Type), Config, NCreatedAt, Desc})
-                end, Reources).
-
-import_blacklist(Blacklist) ->
-    lists:foreach(fun(#{<<"who">> := Who,
-                        <<"by">> := By,
-                        <<"reason">> := Reason,
-                        <<"at">> := At,
-                        <<"until">> := Until}) ->
-                    NWho = case Who of
-                                #{<<"peerhost">> := Peerhost} ->
-                                    {ok, NPeerhost} = inet:parse_address(Peerhost),
-                                    {peerhost, NPeerhost};
-                                #{<<"clientid">> := ClientId} -> {clientid, ClientId};
-                                #{<<"username">> := Username} -> {username, Username}
-                            end,
-                    emqx_banned:create({banned, NWho, By, Reason, At, Until})
-                end, Blacklist).
-
-import_applications(Apps) ->
-    lists:foreach(fun(#{<<"id">> := AppID,
-                        <<"secret">> := AppSecret,
-                        <<"name">> := Name,
-                        <<"desc">> := Desc,
-                        <<"status">> := Status,
-                        <<"expired">> := Expired}) ->
-        NExpired = case is_integer(Expired) of
-            true -> Expired;
-            false -> undefined
-        end,
-        mnesia:dirty_write(mqtt_app, {mqtt_app, AppID, AppSecret, Name, Desc, Status, NExpired})
-    end, Apps).
-
-import_users(Users) ->
-    lists:foreach(fun(#{<<"username">> := Username,
-                        <<"password">> := Password,
-                        <<"tags">> := Tags}) ->
-        NPassword = base64:decode(Password),
-         mnesia:dirty_write(mqtt_admin, {mqtt_admin, Username, NPassword, Tags})
-    end, Users).
-
-import_schemas(undefined) -> ok;
-import_schemas(Schemas) ->
-    lists:foreach(fun(#{<<"name">> := Name,
-                        <<"parser_type">> := ParserType,
-                        <<"schema">> := SchemaText} = Schema) ->
-        ParserAddr = maps:get(<<"parser_addr">>, Schema, undefined),
-        ParserOpts = maps:get(<<"parser_opts">>, Schema, #{}),
-        Descr = maps:get(<<"descr">>, Schema, <<>>),
-        Params = #{name => Name,
-                parser_type => ensure_parser_type(ParserType),
-                schema => ensure_schema(ParserType, SchemaText),
-                parser_addr => make_parser_addr(ParserType, ParserAddr),
-                parser_opts => make_parser_opts(ParserType, ParserOpts),
-                descr => Descr},
-        emqx_schema_registry:add_schema(Params)
-    end, Schemas).
-
-any_to_atom(L) when is_list(L) -> list_to_atom(L);
-any_to_atom(B) when is_binary(B) -> binary_to_atom(B, utf8);
-any_to_atom(A) when is_atom(A) -> A.
 
 format_parser_addr(undefined) ->
     null;
@@ -271,71 +106,6 @@ format_parser_addr({http, Url}) ->
 format_parser_addr({tcp, Host, Port}) ->
     #{<<"host">> => bin(inet:ntoa(Host)), <<"port">> => Port}.
 
-ensure_schema(<<"avro">>, Schema) when is_binary(Schema) ->
-    Schema;
-ensure_schema(<<"avro">>, Schema) ->
-    emqx_json:encode(Schema);
-ensure_schema(_, Schema) when is_binary(Schema) ->
-    Schema.
-
-make_parser_opts(_, undefined) ->
-    #{};
-make_parser_opts(_, ParserOpts) ->
-    do_make_parser_opts(ParserOpts, #{}).
-
-do_make_parser_opts(ParserOpts, Opts) when is_map(ParserOpts) ->
-    do_make_parser_opts(maps:to_list(ParserOpts), Opts);
-do_make_parser_opts([], Opts) ->
-    Opts;
-do_make_parser_opts([{<<"3rd_party_opts">>, Val} | ParserOpts], Opts) ->
-    do_make_parser_opts(ParserOpts, Opts#{'3rd_party_opts' => Val});
-do_make_parser_opts([{<<"connect_timeout">>, Val} | ParserOpts], Opts) ->
-    do_make_parser_opts(ParserOpts, Opts#{'connect_timeout' => int(Val)});
-do_make_parser_opts([{<<"parse_timeout">>, Val} | ParserOpts], Opts) ->
-    do_make_parser_opts(ParserOpts, Opts#{'parse_timeout' => int(Val)});
-do_make_parser_opts([_Opt | ParserOpts], Opts) ->
-    do_make_parser_opts(ParserOpts, Opts).
-
-make_parser_addr(_, null) ->
-    undefined;
-make_parser_addr(_, undefined) ->
-    undefined;
-make_parser_addr(_, ParserAddr) when is_list(ParserAddr) ->
-    make_parser_addr(maps:from_list(ParserAddr));
-make_parser_addr(_, ParserAddr) ->
-    make_parser_addr(ParserAddr).
-
-ensure_parser_type(<<"avro">>) -> avro;
-ensure_parser_type(<<"protobuf">>) -> protobuf;
-ensure_parser_type(<<"json">>) -> json;
-ensure_parser_type(<<"3rd-party">>) -> '3rd-party'.
-
-make_parser_addr(#{<<"server">> := TcpAddr}) ->
-    make_tcp_addr(TcpAddr);
-make_parser_addr(#{<<"resource_id">> := ResourceId}) ->
-    {resource_id, ResourceId};
-make_parser_addr(#{<<"url">> := Url}) ->
-    {http, str(Url)};
-make_parser_addr(#{<<"host">> := Host, <<"port">> := Port}) ->
-    {ok, Host0} = inet:parse_address(str(Host)),
-    {tcp, Host0, Port};
-make_parser_addr(_) ->
-    ok.
-
-make_tcp_addr(Address) ->
-    [Host, Port] = string:split(Address, ":"),
-    {ok, Host0} = inet:parse_address(str(Host)),
-    {tcp, Host0, binary_to_integer(Port)}.
-
-int(Str) when is_list(Str) -> list_to_integer(Str);
-int(Bin) when is_binary(Bin) -> binary_to_integer(Bin);
-int(Float) when is_float(Float) -> round(Float);
-int(Int) when is_integer(Int) -> Int.
-
-str(Str) when is_list(Str) -> Str;
-str(Atom) when is_atom(Atom) -> atom_to_list(Atom);
-str(Bin) when is_binary(Bin) -> binary_to_list(Bin).
-
 bin(Str) when is_list(Str) -> list_to_binary(Str);
 bin(Bin) when is_binary(Bin) -> Bin.
 
@@ -344,6 +114,7 @@ datetime() ->
     lists:flatten(
         io_lib:format(
             "~4..0w-~2..0w-~2..0w ~2..0w:~2..0w:~2..0w", [Y, M, D, H, MM, S])).
+
 
 EOF
 
