@@ -158,13 +158,7 @@ case "$1" in
         echo "emqx_dump:export(\"$2\")." > $pipefile
         echo "The emqx data has been successfully exported to $2/emqx-export.json"
         ;;
-    import)
-        echo "$2"
-        echo "emqx_dump:import(\"$2\")." > $pipefile
-        echo "The emqx data has been imported successfully."
-        ;;
-    *)
-    echo "Usage: export|import}"
+    echo "Usage: export}"
     exit 1
     ;;
 esac
