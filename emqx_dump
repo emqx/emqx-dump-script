@@ -2,7 +2,7 @@
 # -*- tab-width:4;indent-tabs-mode:nil -*-
 # ex: ts=4 sw=4 et
 
-read -r -d '' VAR <<'EOF'
+VAR="
 -module(emqx_dump).
 
 -export([export/1]).
@@ -19,7 +19,7 @@ export(Dir) ->
     AuthUsername = export_auth_username(),
     AuthMnesia = export_auth_mnesia(),
     AclMnesia = export_acl_mnesia(),
-    Filename = filename:join([Dir, "emqx-export.json"]),
+    Filename = filename:join([Dir, \"emqx-export.json\"]),
     Data = [{version, erlang:list_to_binary(Version)},
             {date, iolist_to_binary(datetime())},
             {rules, Rules},
@@ -32,12 +32,7 @@ export(Dir) ->
             {auth_mnesia, AuthMnesia},
             {acl_mnesia, AclMnesia},
             {schemas, Schemas}],
-    case file:write_file(Filename, emqx_json:encode(Data)) of
-        ok ->
-            io:format("The emqx data has been successfully exported to ~s.~n", [Filename]);
-        {error, Reason} ->
-            io:format("The emqx data export failed due to ~p.~n", [Reason])
-    end.
+    file:write_file(Filename, emqx_json:encode(Data)).
 
 export_rules() ->
     lists:foldl(fun({_, RuleId, _, RawSQL, _, _, _, _, _, Actions, Enabled, Desc}, Acc) ->
@@ -64,7 +59,7 @@ export_resources() ->
                     {description, Desc}] | Acc]
             end, [], emqx_rule_registry:get_resources()).
 
-export_blacklist("4.0") ->
+export_blacklist(\"4.0\") ->
     lists:foldl(fun({_, Who, By, Reason, At, Until}, Acc) ->
         [banned(Who, By, Reason, At, Until) | Acc]
     end, [], ets:tab2list(emqx_banned));
@@ -145,62 +140,35 @@ export_schemas() ->
 format_parser_addr(undefined) ->
     null;
 format_parser_addr({resource_id, ResId}) ->
-    #{<<"resource_id">> => ResId};
+    #{<<\"resource_id\">> => ResId};
 format_parser_addr({http, Url}) ->
-    #{<<"url">> => bin(Url)};
+    #{<<\"url\">> => bin(Url)};
 format_parser_addr({tcp, Host, Port}) ->
-    #{<<"host">> => bin(inet:ntoa(Host)), <<"port">> => Port}.
+    #{<<\"host\">> => bin(inet:ntoa(Host)), <<\"port\">> => Port}.
 
 bin(Str) when is_list(Str) -> list_to_binary(Str);
 bin(Bin) when is_binary(Bin) -> Bin.
 
 datetime() ->
     {{Y,M,D}, {H,MM,S}} = calendar:system_time_to_local_time(erlang:system_time(second), second),
-    lists:flatten(
-        io_lib:format(
-            "~4..0w-~2..0w-~2..0w ~2..0w:~2..0w:~2..0w", [Y, M, D, H, MM, S])).
+    lists:flatten(io_lib:format(\"~4..0w-~2..0w-~2..0w ~2..0w:~2..0w:~2..0w\", [Y, M, D, H, MM, S])).
+"
 
-
-EOF
-
-dumpfile="MakeDumpFile = fun(File) ->
-
-        IsNotDot = fun ({dot,_}) -> false;
-                        (_)       -> true
-                   end,
-
-        SplitToks = fun Split_toks_at_dot(AllToks) ->
-                        case lists:splitwith(IsNotDot, AllToks) of
-                            {Toks, [{dot,_}=Dot]}      -> [Toks ++ [Dot]];
-                            {Toks, [{dot,_}=Dot | Tl]} -> [Toks ++ [Dot] | Split_toks_at_dot(Tl)]
-                        end
-                    end,
-
-        {ok, Toks, _EndLine} = erl_scan:string(File),
-        FormToks = SplitToks(Toks),
-        Forms = [case erl_parse:parse_form(Ts) of
-                     {ok, Form} ->
-                         Form;
-                     {error, Reason} ->
-                         erlang:error({erl_parse_failed, Reason})
-                 end
-                 || Ts <- FormToks],
-        compile:noenv_forms(Forms, [binary])
-    end."
 
 pipefile="`ps -ef | grep run_erl | grep -o -E '\-daemon (\S*)' | awk '{print $2}'`erlang.pipe.1.w"
 
-echo "f()." > $pipefile
-echo "${dumpfile}" > $pipefile
-echo Code="\""${VAR//\"/\\\"}"\"". > $pipefile
-echo "{ok, Mod, BinaryCode} = MakeDumpFile(Code)." > $pipefile
-echo "code:load_binary(Mod, \"emqx_dump.erl\", BinaryCode)." > $pipefile
-echo "f()." > $pipefile
+echo ${VAR} > emqx_dump.erl
+file="`pwd`/emqx_dump.erl"
+echo "f().\n" > $pipefile
+sleep 1
+echo "compile:file(\"${file}\").\n" > $pipefile
+sleep 1
 
 case "$1" in
     export)
         echo "$2"
         echo "emqx_dump:export(\"$2\")." > $pipefile
+        rm -rf ${file}
         echo "The emqx data has been successfully exported to $2/emqx-export.json"
         ;;
     *)
