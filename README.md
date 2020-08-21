@@ -4,7 +4,7 @@ EMQX Dump Script
 ## guide
 
 ```
-git clone -b export https://github.com/emqx-dump-script
+git clone -b export https://github.com/emqx/emqx-dump-script
 
 cd emqx-dump-script 
 
