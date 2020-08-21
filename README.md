@@ -7,6 +7,7 @@ EMQX Dump Script
 git clone -b export https://github.com/emqx-dump-script
 
 cd emqx-dump-script 
-./emqx_dump_script data_dir
+
+./emqx_dump_script export data_dir
 
 ```
