@@ -161,13 +161,14 @@ echo ${VAR} > emqx_dump.erl
 file="`pwd`/emqx_dump.erl"
 echo "f().\n" > $pipefile
 sleep 1
-echo "compile:file(\"${file}\").\n" > $pipefile
+echo "compile:file(\"${file}\"), {ok, Dir} = file:get_cwd(), code:add_patha(Dir), code:load_file(emqx_dump).\n" > $pipefile
 sleep 1
 
 case "$1" in
     export)
         echo "$2"
         echo "emqx_dump:export(\"$2\")." > $pipefile
+
         rm -rf ${file}
         echo "The emqx data has been successfully exported to $2/emqx-export.json"
         ;;
